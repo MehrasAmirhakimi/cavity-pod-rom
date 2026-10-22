@@ -402,3 +402,39 @@ def s4_nusselt(r, outdir=None, Re_show=150):
     ax[1].legend(fontsize=7.6)
     fig.tight_layout()
     return _save(fig, "s4_nusselt.png", outdir)
+
+
+def s4_dense(r, outdir=None):
+    """Denser-training check: ORBI 2 vs global at r, plus mode-energy and mode-matching diagnostics."""
+    meths = list(r["methods"])
+    fig, ax = plt.subplots(2, 2, figsize=(10, 7.2))
+    for it, Re in enumerate(r["tests"]):
+        a = ax[0, it]
+        for m, col in (("ORBI 2", S4_STYLE["ORBI 2"]["color"]), ("global", S4_STYLE["global"]["color"])):
+            for iset, (ls, lab) in enumerate((("--", "original training"), ("-", "denser training"))):
+                y = r["rom_err"][iset, it, :, meths.index(m)]
+                a.semilogy(r["r_list"], y, color=col, ls=ls, marker="s" if m.startswith("ORBI") else "D",
+                           ms=4.5, label=f"{m}, {lab}")
+        a.set_title(f"Re = {Re} (unseen): Galerkin ROM error")
+        a.set_xlabel("number of modes r")
+        a.set_ylabel("max relative error, 0 < t ≤ 20")
+    ax[0, 0].legend(fontsize=7.6)
+    k = r["r_diag"]
+    a = ax[1, 0]
+    a.bar(k, r["cos_kk_100_150"], color=S4_STYLE["ORBI 2"]["color"], width=0.7)
+    a.set_ylim(0, 1.05)
+    a.set_xlabel("mode index k")
+    a.set_ylabel("|cos| between k-th modes")
+    a.set_title("Mode k at Re = 100 vs mode k at Re = 150")
+    a = ax[1, 1]
+    for Re, ls in ((70, ":"), (100, "--"), (150, "-")):
+        a.semilogy(k, r[f"tail_Re{Re}"], color=S4_STYLE["ORBI 2"]["color"], ls=ls, label=f"local basis, Re = {Re}")
+    a.semilogy(k, r["tail_global"], color=S4_STYLE["global"]["color"], lw=2, label="global basis (5 training Re)")
+    a.axhline(1e-6, color="#52514e", lw=0.8, ls=":")
+    a.text(30, 1.4e-6, "full-solver tolerance 1e-6", ha="right", fontsize=8, color="#52514e")
+    a.set_xlabel("number of modes r")
+    a.set_ylabel("energy fraction left out (L2)")
+    a.set_title("What the higher modes carry")
+    a.legend(fontsize=7.6, loc="lower left")
+    fig.tight_layout()
+    return _save(fig, "s4_dense.png", outdir)

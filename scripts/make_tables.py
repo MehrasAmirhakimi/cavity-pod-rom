@@ -135,8 +135,36 @@ def stage4():
                                         for j in range(len(Q))) + " |")
 
 
+def stage4_dense():
+    r = R("stage4_dense.npz")
+    M, Rl = list(r["methods"]), list(r["r_list"])
+    print(f"\nStage 4 note: original training {r['train_original'].tolist()}, "
+          f"denser training {r['train_denser'].tolist()}, tests {r['tests'].tolist()}")
+    print("Galerkin ROM error (max relative over 0 < t <= 20)\n")
+    print("| Test Re | Method | training | " + " | ".join(f"r = {x}" for x in Rl) + " |")
+    print("|---|---|---|" + "---|" * len(Rl))
+    for it, Re in enumerate(r["tests"]):
+        for m in ("ORBI 2", "global"):
+            for iset, name in enumerate(r["sets"]):
+                v = r["rom_err"][iset, it, :, M.index(m)]
+                print(f"| {Re} | {m} | {name} | " + " | ".join((f"{100*x:.0f} %" if x >= 0.1 else f"{100*x:.2g} %") for x in v) + " |")
+    a = r["max_angle"][:, :, :, M.index("ORBI 2")]
+    print("largest ORBI 2 rotation angle at r = 30 (rad): original "
+          + ", ".join(f"{x:.2f}" for x in a[0, :, -1]) + "; denser " + ", ".join(f"{x:.2f}" for x in a[1, :, -1]))
+    for Re in (70, 100, 150):
+        t = r[f"tail_Re{Re}"]
+        print(f"local Re={Re}: energy left out falls below 1e-6 at r = {int(r['r_diag'][np.argmax(t < 1e-6)])}; "
+              f"after 15 modes {t[14]:.1e}")
+    print(f"global: energy left out after 20 modes {r['tail_global'][19]:.1e}, after 30 {r['tail_global'][29]:.1e}")
+    c = r["cos_kk_100_150"]
+    print("|cos| k-th modes Re 100 vs 150: k=1-10 min " f"{c[:10].min():.2f}; k=11 {c[10]:.2f}, k=12 {c[11]:.2f}, "
+          f"k=13 {c[12]:.2f}, k=15 {c[14]:.2f}, k=20 {c[19]:.2f}, k=30 {c[29]:.2f}; "
+          f"best match of k=15 is {int(r['best_match_100_150'][14])}, of k=20 is {int(r['best_match_100_150'][19])}")
+
+
 if __name__ == "__main__":
     stage1()
     stage2()
     stage3()
     stage4()
+    stage4_dense()

@@ -16,4 +16,5 @@ python scripts/stage3.py
 bash scripts/run_orbi_foms.sh
 python scripts/stage4_orbi.py
 python scripts/stage4_nusselt.py
+python scripts/stage4_dense.py
 python scripts/make_tables.py

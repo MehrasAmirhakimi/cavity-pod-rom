@@ -363,13 +363,58 @@ of the paper.
 ![Error versus r](figures/s4_error_vs_r.png)
 ![Nusselt number at unseen Re](figures/s4_nusselt.png)
 
+#### Note: does denser training fix ORBI at high rank?
+
+I moved four former test Re (35, 70, 150, 280) into the training set. This cuts
+the spacing between training Re from a factor of 2 to about 1.4. Only Re = 80 and
+125 stay unseen, so this check rests on two test points
+(`scripts/stage4_dense.py`). Galerkin ROM error, max relative over 0 < t ≤ 20:
+
+| Test Re | Method | training | r = 5 | r = 10 | r = 15 | r = 20 | r = 30 |
+|---|---|---|---|---|---|---|---|
+| 80 | ORBI 2 | original | 2.8 % | 2.8 % | 18 % | 60 % | 248 % |
+| 80 | ORBI 2 | denser | 0.53 % | 0.26 % | 4.4 % | 106 % | 4.9 % |
+| 80 | global | original | 17 % | 6.5 % | 1.4 % | 0.56 % | 0.08 % |
+| 80 | global | denser | 16 % | 5.8 % | 1.4 % | 0.46 % | 0.08 % |
+| 125 | ORBI 2 | original | 3 % | 3 % | 14 % | 62 % | 46 % |
+| 125 | ORBI 2 | denser | 1.5 % | 0.94 % | 2 % | 2.9 % | 12 % |
+| 125 | global | original | 18 % | 4.5 % | 1.4 % | 0.67 % | 0.12 % |
+| 125 | global | denser | 17 % | 3.7 % | 1.4 % | 0.5 % | 0.078 % |
+
+- **At low rank, denser training helps ORBI a lot.** At r = 10 its error falls from
+  2.8 % to 0.26 % (Re = 80) and from 3.0 % to 0.94 % (Re = 125). It then beats the
+  global basis by a factor of 4 to 22.
+- **At high rank it does not fix ORBI.** The errors at r = 20 and 30 stay large
+  and erratic: at Re = 80, r = 20 even got worse (60 % to 106 %). The largest
+  rotation angle at r = 30 is still close to π (3.02–3.12 rad). The global basis
+  stays best at r ≥ 15 and hardly changes with the extra training Re.
+- **Why.** In a single-Re run the energy left out by the local basis falls below
+  10⁻⁶ after 11–15 modes (Re = 70 to 150). That is the size of the full solver's
+  own convergence tolerance. At the same point the modes of neighbouring Re stop
+  matching: the k-th modes at Re = 100 and 150 have |cos| ≥ 0.91 for k ≤ 10, but
+  0.40 for k = 13 and 0.04 for k = 30. The order also swaps: mode 15 at Re = 100
+  matches mode 18 at Re = 150 best, and mode 20 matches mode 13. ORBI pairs the
+  k-th mode with the k-th mode, so above k ≈ 12 it rotates between unrelated
+  shapes. My reading is that these low-energy modes are partly solver noise, so
+  more training points cannot make them vary smoothly with Re.
+- **The global basis is different.** Its higher modes describe how the flow
+  changes between Re, which is real and energetic: after 20 modes it still leaves
+  out 9.0 × 10⁻⁴ of the field, against 10⁻⁸ to 10⁻⁷ for a local basis.
+- **Practical rule for this problem.** Cap the local rank where the local modes
+  still carry energy above the solver tolerance (here r ≈ 10), and use denser
+  training there. Use the global basis when more modes are needed.
+
+![Denser training check](figures/s4_dense.png)
+
 ## 5. Limitations and next steps
 
 - **Parametric transient ROM.** A global basis from 5 training Re reaches 1 % at
   unseen Re with r = 30. ORBI helps only at low rank (r ≤ 10), where its error
-  is still about 8 % worst and 3–4 % median. In both cases the Galerkin error is several times the best-fit
-  error. Next steps: closure or stabilisation terms, adapted DEIM bases (as in the
-  paper), more training Re, and longer time windows.
+  is about 8 % worst and 3–4 % median with 5 training Re, and 0.26–0.94 % at two
+  test Re with 9 training Re. Denser training does not fix ORBI at high rank.
+  In both methods the Galerkin error is several times the best-fit error. Next
+  steps: closure or stabilisation terms, adapted DEIM bases (as in the paper),
+  an ORBI basis enriched with global modes, and longer time windows.
 - **The upwind full solver is too diffusive at high Re.** At Re = 1000 it differs from
   Ghia et al. by up to 0.17 in u. The ROMs inherit this. A second-order convection
   scheme or a finer grid would fix the reference, not the ROM.
