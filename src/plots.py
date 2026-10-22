@@ -1,6 +1,8 @@
 """Figures for the README and the notebook. Each function takes a results dict."""
 import os
 
+import matplotlib
+import matplotlib.ticker
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -310,3 +312,93 @@ def s3_thermal(r, outdir=None, qs=(10, 20, 30)):
     ax[2].legend(fontsize=7.8)
     fig.tight_layout()
     return _save(fig, "s3_thermal.png", outdir)
+
+
+# ------------------------------------------------------------------ Stage 4 (ORBI)
+S4_STYLE = {"order 0": dict(color="#52514e", ls=":", marker="o"),
+            "ITSGM 1": dict(color="#6250d6", ls="--", marker="^"),
+            "ORBI 1": dict(color="#2a78d6", ls="--", marker="s"),
+            "ITSGM 2": dict(color="#6250d6", ls="-", marker="^"),
+            "ORBI 2": dict(color="#2a78d6", ls="-", marker="s"),
+            "global": dict(color="#eb6834", ls="-", marker="D")}
+
+
+def s4_error_vs_Re(r, outdir=None, rr=10):
+    meths = list(r["methods"])
+    ir = list(r["r_list"]).index(rr)
+    Re = r["eval_Re"]
+    fig, ax = plt.subplots(2, 2, figsize=(10, 6.4), sharex=True, sharey="row")
+    for j, q in enumerate((1, 2)):
+        for i, key in enumerate(("proj_max", "rom_max")):
+            a = ax[i, j]
+            for m in ("order 0", f"ITSGM {q}", f"ORBI {q}", "global"):
+                st = S4_STYLE[m]
+                y = r[key][meths.index(m), ir]
+                ok = np.isfinite(y)
+                a.semilogy(Re[ok], y[ok], color=st["color"], ls=st["ls"], marker=st["marker"],
+                           ms=4.5, label=m)
+            for t in r["train"]:
+                a.axvline(t, color="#c3c2b7", lw=0.8, zorder=0)
+            a.set_xscale("log")
+            a.set_xticks(list(r["train"]))
+            a.set_xticks([], minor=True)
+            a.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+        ax[0, j].set_title(f"Interpolation order {q} (r = {rr})")
+        ax[1, j].set_xlabel("Re (grey lines: training Re)")
+        ax[0, j].legend(fontsize=7.8, loc="lower right")
+    ax[0, 0].set_ylabel("best fit in basis\n(max relative error, 0 < t ≤ 20)")
+    ax[1, 0].set_ylabel("Galerkin ROM\n(max relative error, 0 < t ≤ 20)")
+    fig.tight_layout()
+    return _save(fig, "s4_error_vs_Re.png", outdir)
+
+
+def s4_error_vs_r(r, outdir=None):
+    meths = list(r["methods"])
+    test_idx = [list(r["eval_Re"]).index(t) for t in r["test"]]
+    fig, ax = plt.subplots(1, 2, figsize=(10, 3.7), sharey=True)
+    for a, key, ttl in zip(ax, ("proj_max", "rom_max"), ("Best fit in basis", "Galerkin ROM")):
+        for m in meths:
+            st = S4_STYLE[m]
+            y = np.nanmax(r[key][meths.index(m)][:, test_idx], axis=1)
+            a.semilogy(r["r_list"], y, color=st["color"], ls=st["ls"], marker=st["marker"], ms=4.5, label=m)
+        a.set_xlabel("number of modes r")
+        a.set_title(f"{ttl}: worst of the 6 test Re")
+    i2 = meths.index("ITSGM 2")
+    if not np.all(np.isfinite(r["rom_max"][i2][-1])):
+        ax[1].annotate("ITSGM 2 diverged\nat r = 30", xy=(30, 10), ha="right", fontsize=8,
+                       color=S4_STYLE["ITSGM 2"]["color"])
+    ax[0].set_ylabel("max relative error, 0 < t ≤ 20")
+    h, l = ax[0].get_legend_handles_labels()
+    fig.legend(h, l, loc="lower center", ncol=6, bbox_to_anchor=(0.5, -0.07))
+    fig.tight_layout()
+    return _save(fig, "s4_error_vs_r.png", outdir)
+
+
+def s4_nusselt(r, outdir=None, Re_show=150):
+    meths = list(r["methods"])
+    st = dict(S4_STYLE)
+    st["global r=30"] = dict(color="#eb6834", ls="--", marker="D")
+    lab = {"global": "global (flow r = 10)", "global r=30": "global (flow r = 30)"}
+    fig, ax = plt.subplots(1, 2, figsize=(10, 3.8))
+    for m in meths:
+        s = st[m]
+        ax[0].semilogy(r["q_list"], 100 * np.nanmax(r["nu_rel"][meths.index(m)], axis=1), color=s["color"],
+                       ls=s["ls"], marker=s["marker"], ms=4.5, label=lab.get(m, m))
+    ax[0].set_xlabel("temperature modes q")
+    ax[0].set_ylabel("max relative error in lid Nu (%)\nworst of 6 test Re, 1 ≤ t ≤ 20")
+    ax[0].set_title("Nusselt number at unseen Re")
+    ax[0].legend(fontsize=7.6)
+    it = list(r["test"]).index(Re_show)
+    t = r["t"]
+    ax[1].plot(t[1:], r["nu_fom"][it][1:], color="#0b0b0b", lw=2.4, label="full solver")
+    for m in ("order 0", "ORBI 1", "global r=30"):
+        key = f"nu_{m.replace(' ', '').replace('=', '')}_Re{Re_show}"
+        s = st[m]
+        ax[1].plot(t[1:], r[key][1:], color=s["color"], ls="--", lw=1.6, label=lab.get(m, m) + ", q = 10")
+    ax[1].set_xlabel("t")
+    ax[1].set_ylabel("average lid Nusselt number")
+    ax[1].set_title(f"Re = {Re_show} (not in training)")
+    ax[1].set_ylim(0, 60)
+    ax[1].legend(fontsize=7.6)
+    fig.tight_layout()
+    return _save(fig, "s4_nusselt.png", outdir)

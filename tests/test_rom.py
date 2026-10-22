@@ -117,3 +117,16 @@ def test_temperature_operator_and_thermal_rom():
     TT = T_full.reshape(g.jm + 1, g.im + 1)
     TT[1:-1, 1:-1] = T_rec.reshape(g.n, g.n)
     assert np.isclose(nu_rom, solver.lid_nusselt(g, TT.ravel()), rtol=1e-12)
+
+
+def test_thermal_rom_full_grid_option_equals_identity_deim():
+    from src import thermal_rom as trm
+    r = solver.run_transient(Re=100, Pr=7, im=17, tf=2.0, nm=10, linear_solver="direct")
+    g = r["grid"]
+    Ti = trm.interior(g, r["T"])
+    Phi = pod.pod_svd(r["omega"].T)[0][:, :5]
+    fr = GalerkinROM(g, 100, Phi, np.zeros(g.N))
+    Theta = pod.pod_svd(Ti.T)[0][:, :6]
+    a = trm.ThermalROM(g, 100, 7, Theta, np.zeros(g.N), fr)
+    b = trm.ThermalROM(g, 100, 7, Theta, np.zeros(g.N), fr, np.eye(g.N), np.arange(g.N))
+    assert np.allclose(a.G, b.G) and np.allclose(a.K, b.K)

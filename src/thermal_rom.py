@@ -60,7 +60,8 @@ def nusselt_rows(g):
 
 
 class ThermalROM:
-    def __init__(self, g, Re, Pr, Theta, T_ref, flow_rom, nl_basis, nl_points):
+    def __init__(self, g, Re, Pr, Theta, T_ref, flow_rom, nl_basis=None, nl_points=None):
+        """nl_basis=None evaluates the upwind term on the whole grid (no DEIM)."""
         t0 = time.perf_counter()
         self.g, self.Re, self.Pr = g, Re, Pr
         self.Theta, self.T_ref = Theta, T_ref
@@ -82,9 +83,13 @@ class ThermalROM:
             M[j] = Th @ (-(U[:, j:j + 1] * sm["dx"]) - (V[:, j:j + 1] * sm["dy"]))
         self.M = M
         # DEIM for the upwind dissipation |u| d2x T/(2dx) + |v| d2y T/(2dy)
-        p = np.asarray(nl_points)
+        if nl_basis is None:                      # full-grid evaluation
+            p = np.arange(g.N)
+            self.G = Th
+        else:
+            p = np.asarray(nl_points)
+            self.G = Th @ nl_basis @ np.linalg.inv(nl_basis[p, :])                 # (q, m)
         self.p = p
-        self.G = Th @ nl_basis @ np.linalg.inv(nl_basis[p, :])                     # (q, m)
         self.up0, self.Up, self.vp0, self.Vp = u0[p], U[p], v0[p], V[p]
         self.x0, self.X = sr["d2x"][p] / (2 * g.dx), sm["d2x"][p] / (2 * g.dx)
         self.y0, self.Y = sr["d2y"][p] / (2 * g.dy), sm["d2y"][p] / (2 * g.dy)

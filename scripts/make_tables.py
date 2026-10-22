@@ -93,7 +93,50 @@ def stage3():
     print(f"steady Nu (full solver, t=200): {r['nu_fom'][-1]:.4f}")
 
 
+def stage4():
+    r = R("stage4.npz")
+    M, Rl, E = list(r["methods"]), list(r["r_list"]), list(r["eval_Re"])
+    ti = [E.index(t) for t in r["test"]]
+    print(f"\nStage 4: train Re {r['train'].tolist()}, test Re {r['test'].tolist()}")
+    for key, ttl in (("rom_max", "Galerkin ROM"), ("proj_max", "best fit in basis")):
+        print(f"\n{ttl}: max relative error of omega over 0 < t <= 20, worst of the 6 test Re (median)\n")
+        print("| method | " + " | ".join(f"r = {x}" for x in Rl) + " |")
+        print("|---|" + "---|" * len(Rl))
+        for i, m in enumerate(M):
+            cells = []
+            for j in range(len(Rl)):
+                v = r[key][i, j, ti]
+                w = np.nanmax(v)
+                cells.append("diverged" if not np.isfinite(w) else f"{w:.1e} ({np.nanmedian(v):.1e})")
+            print(f"| {m} | " + " | ".join(cells) + " |")
+    for q in (1, 2):
+        a = r["proj_max"][M.index(f"ITSGM {q}")][:, ti] / r["proj_max"][M.index(f"ORBI {q}")][:, ti]
+        print(f"order {q}: ITSGM/ORBI best-fit ratio, median over test Re, per r: "
+              + ", ".join(f"r={x}: {np.median(a[j]):.2f}" for j, x in enumerate(Rl)))
+    j10 = Rl.index(10)
+    print(f"largest ORBI rotation angle: r=10 {np.nanmax(r['max_angle'][:, j10]):.2f} rad, "
+          f"r=30 {np.nanmax(r['max_angle'][:, Rl.index(30)]):.2f} rad (pi = 3.14)")
+    print(f"ORBI 2 adaptation time (r=10, median): {1e3*np.nanmedian(r['t_adapt'][M.index('ORBI 2'), j10, ti]):.1f} ms; "
+          f"operator assembly {np.nanmedian(r['t_build'][:, j10, ti]):.3f} s")
+    print(f"DEIM (r=10, common DEIM basis), m = {r['deim_m_list'].tolist()}: worst over test Re "
+          f"ORBI 2 {[f'{x:.1e}' for x in r['deim_err'][0].max(axis=1)]}, "
+          f"global {[f'{x:.1e}' for x in r['deim_err'][1].max(axis=1)]}; "
+          f"online time {1e3*r['deim_wall'].min():.0f}-{1e3*r['deim_wall'].max():.0f} ms; "
+          f"full solver, same 100 steps: {r['fom_wall_test'].min():.0f}-{r['fom_wall_test'].max():.0f} s")
+    n = R("stage4_nu.npz")
+    Mn, Q = list(n["methods"]), list(n["q_list"])
+    print(f"\nLid Nusselt number, flow r = {n['r_flow']} (global also at r = 30): max relative error over "
+          f"{n['t_start']:g} <= t <= 20, worst of the 6 test Re (median)\n")
+    print("| method | " + " | ".join(f"q = {x}" for x in Q) + " |")
+    print("|---|" + "---|" * len(Q))
+    for i, m in enumerate(Mn):
+        v = n["nu_rel"][i]
+        print(f"| {m} | " + " | ".join(f"{100*np.nanmax(v[j]):.1f} % ({100*np.nanmedian(v[j]):.1f} %)"
+                                        for j in range(len(Q))) + " |")
+
+
 if __name__ == "__main__":
     stage1()
     stage2()
     stage3()
+    stage4()

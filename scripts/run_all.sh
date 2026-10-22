@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Reproduce every result from scratch (about 30 min on 2 CPU cores).
-# Full-order data go to data/ (about 1.4 GB, not in git); results/ and figures/ are small.
+# Reproduce every result from scratch (about 2 h on 2 CPU cores).
+# Full-order data go to data/ (about 2 GB, not in git); results/ and figures/ are small.
 set -e
 cd "$(dirname "$0")/.."
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
@@ -13,4 +13,7 @@ python scripts/run_steady_sweep.py
 python scripts/stage1.py
 python scripts/stage2.py
 python scripts/stage3.py
+bash scripts/run_orbi_foms.sh
+python scripts/stage4_orbi.py
+python scripts/stage4_nusselt.py
 python scripts/make_tables.py

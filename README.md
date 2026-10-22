@@ -1,13 +1,15 @@
 # POD reduced-order models of the lid-driven cavity
 
 This repository builds reduced-order models (ROMs) of my stream function–vorticity
-finite-difference solver for the lid-driven cavity. It has three parts:
+finite-difference solver for the lid-driven cavity. It has four parts:
 
 1. **Intrusive POD-Galerkin ROM** of the transient flow at Re = 100, with DEIM
    hyper-reduction of the non-polynomial upwind term.
 2. **Non-intrusive parametric POD** of steady solutions over 10 ≤ Re ≤ 1000, with
    RBF and Gaussian-process interpolation of the modal coefficients.
 3. **Coupled thermal ROM** for the passive temperature field and the lid Nusselt number.
+4. **Basis adaptation to an unseen Re** for the transient Galerkin ROM: ordered
+   reduced basis interpolation (ORBI) and ITSGM, compared with a global basis.
 
 Every number below comes from runs in this repository (`results/*.npz`,
 printed by `scripts/make_tables.py`). The full solver uses the 129 × 129-interval
@@ -23,6 +25,8 @@ grid of the original code.
 | Galerkin ROM, central differences only, any r from 3 to 40 | 10–21 % (does not converge, see below) | — |
 | Parametric POD, RBF, r = 8, 8 held-out Re | 0.19 % (ω), 0.15 % (ψ), 0.07 % (T) | — |
 | Coupled flow + thermal ROM, r = 10, q = 20 (0 < t ≤ 200) | 2.4e-4 (T), 1.1e-3 absolute in lid Nu (t ≥ 1) | 0.18 s vs 351 s, 1,914× faster |
+| Transient ROM at 6 unseen Re, basis by ORBI (order 2), r = 8 | 8.1 % worst, 2.9 % median (27 % / 9.3 % without adaptation) | basis update 1.2 ms |
+| Transient ROM at 6 unseen Re, one global basis from 5 training Re, r = 30 | 0.99 % worst, 0.10 % median | — |
 
 Speed-ups compare online ROM time with my vectorised full solver on the same
 machine (2 CPU cores). The full solver keeps the original Picard loop with
@@ -123,6 +127,42 @@ u, v and T, transient and steady, with the same number of Picard iterations.
 - The thermal Galerkin ROM is driven by the r = 10 flow ROM. Its upwind term
   also uses DEIM. Each step is a small linear solve. The Nusselt number is linear
   in T, so it comes straight from the reduced coefficients.
+
+### Stage 4 — adapting the basis to an unseen Re (ORBI)
+
+A POD basis built at one Re fits that Re only (Stage 1: 8–11 % error at Re = 80
+and 125 with the Re = 100 basis). Stage 4 follows the test design of
+Goutaudier, Nobile & Schiffmann (2023):
+
+- **Data.** Transient runs, 0 ≤ t ≤ 20 (101 snapshots), at 11 Re.
+  Training: Re = 25, 50, 100, 200, 400. Test (never used for training):
+  Re = 35, 70, 80, 125, 150, 280.
+- **Local bases.** One POD basis per training Re, from raw snapshots (no centring),
+  as in the paper. The lifting field is zero: the moving lid enters only through
+  Thom's wall vorticity, so every basis meets the boundary conditions. A first
+  version interpolated a reference field between training Re; its error put a
+  floor of about 1 % under all methods, so I dropped it.
+- **Methods compared at each test Re**, all of rank r:
+  - *order 0*: the basis of the nearest training Re (no adaptation);
+  - *ITSGM 1 / 2*: interpolation on the tangent space to the Grassmann manifold
+    (paper, Eqs. 16–19);
+  - *ORBI 1 / 2*: ordered reduced basis interpolation (paper, Algorithms 1, 2 and 4);
+  - *global*: one POD basis of all 505 training snapshots (SNAPC in the paper).
+
+  Order 1 uses the two training Re that bracket the target; order 2 adds the
+  next-nearest one. The reference basis is the nearest training Re, and the
+  interpolation variable is log10(Re). I compute the principal logarithm of the
+  ORBI rotation with `scipy.linalg.logm` instead of Algorithm 3; both give the
+  same matrix when −1 is not an eigenvalue, which the code checks.
+- **Galerkin ROM.** The upwind term is evaluated on the whole grid, so the
+  methods differ only in the basis. A DEIM version gives the online cost.
+- **Nusselt number.** The same method adapts the temperature basis (q modes); the
+  thermal ROM is driven by the flow ROM of that method (r = 10). The global basis
+  is also run with flow r = 30, where it does best.
+- **Tests.** `tests/test_basis_interp.py` checks that ORBI returns the training
+  bases at the training points, that all outputs are orthonormal, and that ORBI
+  and ITSGM give the same subspace when the inputs are principal-vector bases
+  (paper, Section 4.5, Eq. 28).
 
 ## 4. Results
 
@@ -239,13 +279,97 @@ first one. I now leave out DEIM modes below that level (m ≤ 64).
 
 ![Thermal ROM](figures/s3_thermal.png)
 
+### Stage 4
+
+Galerkin ROM, maximum relative L2 error of ω over 0 < t ≤ 20. Worst of the
+6 test Re, with the median in brackets:
+
+| method | r = 3 | r = 5 | r = 8 | r = 10 | r = 15 | r = 20 | r = 30 |
+|---|---|---|---|---|---|---|---|
+| order 0 | 2.6e-01 (9.6e-02) | 2.7e-01 (9.5e-02) | 2.7e-01 (9.3e-02) | 2.6e-01 (9.3e-02) | 2.9e-01 (8.7e-02) | 3.5e-01 (1.9e-01) | 2.9e-01 (2.2e-01) |
+| ITSGM 1 | 1.7e-01 (6.8e-02) | 1.1e-01 (3.0e-02) | 1.1e-01 (3.0e-02) | 1.0e-01 (4.5e-02) | 3.9e-01 (1.2e-01) | 5.9e-01 (1.9e-01) | 6.5e+00 (5.8e-01) |
+| ORBI 1 | 1.7e-01 (6.8e-02) | 1.1e-01 (2.9e-02) | 1.0e-01 (2.9e-02) | 1.0e-01 (3.9e-02) | 1.7e-01 (9.5e-02) | 1.5e-01 (1.1e-01) | 2.7e+00 (3.4e-01) |
+| ITSGM 2 | 1.7e-01 (6.3e-02) | 8.5e-02 (3.1e-02) | 8.3e-02 (3.0e-02) | 1.1e-01 (7.5e-02) | 1.8e+01 (2.2e-01) | 3.4e+00 (2.9e-01) | diverged |
+| ORBI 2 | 1.8e-01 (6.3e-02) | 8.4e-02 (2.9e-02) | 8.1e-02 (2.9e-02) | 7.9e-02 (4.2e-02) | 4.0e-01 (1.6e-01) | 6.2e-01 (8.9e-02) | 2.5e+00 (4.4e-01) |
+| global | 3.3e-01 (2.5e-01) | 1.9e-01 (1.7e-01) | 1.0e-01 (6.5e-02) | 9.6e-02 (6.8e-02) | 1.8e-02 (1.4e-02) | 1.2e-02 (6.5e-03) | 9.9e-03 (1.0e-03) |
+
+Best fit in the basis (projection error), same layout:
+
+| method | r = 3 | r = 5 | r = 8 | r = 10 | r = 15 | r = 20 | r = 30 |
+|---|---|---|---|---|---|---|---|
+| order 0 | 1.7e-01 (6.3e-02) | 8.8e-02 (5.0e-02) | 8.7e-02 (5.0e-02) | 8.7e-02 (5.0e-02) | 8.6e-02 (4.1e-02) | 7.2e-02 (2.8e-02) | 5.6e-02 (2.4e-02) |
+| ITSGM 1 | 1.6e-01 (5.5e-02) | 4.6e-02 (1.1e-02) | 1.2e-02 (8.0e-03) | 1.5e-02 (8.8e-03) | 3.9e-02 (2.1e-02) | 4.1e-02 (2.1e-02) | 3.1e-02 (1.5e-02) |
+| ORBI 1 | 1.6e-01 (5.5e-02) | 4.5e-02 (1.1e-02) | 1.3e-02 (8.2e-03) | 1.3e-02 (8.9e-03) | 2.0e-02 (1.2e-02) | 2.3e-02 (1.2e-02) | 2.1e-02 (1.0e-02) |
+| ITSGM 2 | 1.6e-01 (5.3e-02) | 4.4e-02 (8.5e-03) | 6.1e-03 (3.2e-03) | 9.7e-03 (5.4e-03) | 3.3e-02 (2.3e-02) | 3.7e-02 (1.7e-02) | 2.8e-02 (1.4e-02) |
+| ORBI 2 | 1.6e-01 (5.2e-02) | 4.3e-02 (8.4e-03) | 6.2e-03 (3.4e-03) | 6.1e-03 (4.5e-03) | 1.7e-02 (1.0e-02) | 1.8e-02 (1.2e-02) | 1.8e-02 (1.1e-02) |
+| global | 3.1e-01 (1.9e-01) | 9.8e-02 (9.6e-02) | 4.8e-02 (3.6e-02) | 3.4e-02 (3.1e-02) | 9.7e-03 (8.1e-03) | 4.1e-03 (3.4e-03) | 1.9e-03 (4.5e-04) |
+
+**At low rank (r = 5 to 10), basis interpolation clearly helps.** ORBI 2 at r = 8
+gives 8.1 % worst and 2.9 % median, against 27 % and 9.3 % with no adaptation and
+10 % and 6.5 % with the global basis. Its best fit is 14 times better than order 0
+and 8 times better than the global basis (worst case, r = 8).
+
+**At higher rank the global basis wins, and by a wide margin.** From r = 15 the
+global ROM error falls to 1.8 % worst, and to 0.99 % worst (0.10 % median) at
+r = 30. The interpolated bases stop improving: their best fit stays near 2 %,
+and their Galerkin ROMs become inaccurate or unstable (ITSGM 2 diverged at r = 30).
+Two observations point to the cause. First, the largest ORBI rotation angle grows
+from 1.92 rad at r = 10 to 3.13 rad at r = 30, close to the limit of π where the
+method breaks down (paper, Section 4.5). Second, the low-energy modes differ
+strongly between neighbouring training Re, so their interpolation is poor. My
+reading is that these poorly placed modes give the Galerkin system wrong dynamics.
+
+**ORBI against ITSGM.** For r ≤ 10 the two give the same accuracy (best-fit
+ratio 0.96–1.02). For r ≥ 15 ORBI's best fit is 1.4–2.0 times better (median over
+test Re), and its ROMs fail less badly. This agrees in direction with the paper,
+which reports a factor of 2 to 5 for the gas-bearing rotor.
+
+**Galerkin error against best fit.** For ORBI 2 at r = 10 the ROM error is 6 to 15
+times the best-fit error at the six test Re (worst case 7.9 % against 0.61 %). The
+ROM error grows with time, for example from 2.9 % at t = 1 to 7.6 % at t = 20 at
+Re = 150. So, as in Stage 1, the Galerkin dynamics, not only the basis, limit the
+accuracy.
+
+**Cost.** The ORBI update of the basis takes 1.2 ms (r = 10) and rebuilding the
+Galerkin operators 0.04 s. With DEIM (one DEIM basis from all training Re,
+m = 20) the ORBI 2 ROM runs in 19–28 ms against 96–427 s for the full solver.
+Up to Re = 150, DEIM changes the error by at most 1.6 percentage points, but at
+Re = 280 the error rises from 7.9 % (full-grid evaluation) to 18 %. The paper also adapts the DEIM bases; I did not.
+
+Lid Nusselt number, maximum relative error over 1 ≤ t ≤ 20, worst of the
+6 test Re (median). Flow ROM r = 10 of the same method; "global r=30" uses a
+rank-30 global flow basis:
+
+| method | q = 5 | q = 10 | q = 15 | q = 20 | q = 30 |
+|---|---|---|---|---|---|
+| order 0 | 26.3 % (13.6 %) | 15.3 % (6.8 %) | 9.0 % (5.5 %) | 10.8 % (5.1 %) | 11.8 % (4.6 %) |
+| ITSGM 2 | 19.0 % (14.3 %) | 8.5 % (3.2 %) | 7.4 % (2.1 %) | 7.2 % (3.0 %) | 8.0 % (1.9 %) |
+| ORBI 1 | 18.0 % (13.7 %) | 4.8 % (1.4 %) | 4.2 % (1.2 %) | 4.1 % (1.5 %) | 4.4 % (1.2 %) |
+| ORBI 2 | 19.0 % (14.3 %) | 4.4 % (2.0 %) | 3.7 % (1.8 %) | 4.0 % (1.8 %) | 6.6 % (1.3 %) |
+| global | 54.5 % (24.9 %) | 18.9 % (12.6 %) | 7.5 % (2.5 %) | 3.2 % (1.3 %) | 2.3 % (0.9 %) |
+| global r=30 | 51.2 % (25.5 %) | 19.9 % (12.7 %) | 6.0 % (2.4 %) | 4.3 % (1.3 %) | 1.4 % (0.6 %) |
+
+The Nusselt number shows the same pattern. With 10 temperature modes, ORBI keeps
+the error below 4.8 % at every test Re, against 15 % with no adaptation and 19 %
+with the global basis. With 30 modes the global basis is best (1.4 % worst).
+
+**What this means for this problem.** The rank-30 global ROM still runs in tens of
+milliseconds, so here the global basis is the better choice. ORBI pays off when
+the rank must stay small: for example in a hyper-reduced model with many
+nonlinear terms, or under a real-time limit, as in the gas-bearing application
+of the paper.
+
+![Error versus Re](figures/s4_error_vs_Re.png)
+![Error versus r](figures/s4_error_vs_r.png)
+![Nusselt number at unseen Re](figures/s4_nusselt.png)
+
 ## 5. Limitations and next steps
 
-- **The intrusive ROM is not robust in Re.** A single-Re basis gives 8–11 % error
-  at Re = 80 and 125. A two-Re basis gives 2.1 %, still about 8 times the
-  projection error. Next steps: a basis from more Re values, basis interpolation
-  such as ORBI (Goutaudier, Nobile & Schiffmann, 2023), or a closure or
-  stabilisation term.
+- **Parametric transient ROM.** A global basis from 5 training Re reaches 1 % at
+  unseen Re with r = 30. ORBI helps only at low rank (r ≤ 10), where its error
+  is still about 8 % worst and 3–4 % median. In both cases the Galerkin error is several times the best-fit
+  error. Next steps: closure or stabilisation terms, adapted DEIM bases (as in the
+  paper), more training Re, and longer time windows.
 - **The upwind full solver is too diffusive at high Re.** At Re = 1000 it differs from
   Ghia et al. by up to 0.17 in u. The ROMs inherit this. A second-order convection
   scheme or a finer grid would fix the reference, not the ROM.
@@ -262,9 +386,9 @@ first one. I now leave out DEIM modes below that level (m ≤ 64).
 
 ```bash
 pip install -r requirements.txt
-python -m pytest -q tests                     # 10 tests, about 30 s
+python -m pytest -q tests                     # 19 tests, about 35 s
 jupyter notebook notebooks/reproduce_figures.ipynb   # all figures from results/
-bash scripts/run_all.sh                       # everything from scratch (~30 min, ~1.4 GB in data/)
+bash scripts/run_all.sh                       # everything from scratch (~2 h, ~2 GB in data/)
 ```
 
 ## 7. Repository layout
@@ -277,10 +401,11 @@ src/
   galerkin_rom.py    intrusive POD-Galerkin ROM with optional DEIM upwind term
   parametric_rom.py  non-intrusive parametric POD (RBF and GPR)
   thermal_rom.py     coupled temperature ROM and Nusselt number
+  basis_interp.py    POD basis adaptation: ORBI and ITSGM
   ghia.py            Ghia et al. (1982) centreline data
   plots.py           all figures
-scripts/             full-order runs, the three stages, tables
-tests/               regression against the original code; ROM consistency tests
+scripts/             full-order runs, the four stages, tables
+tests/               regression against the original code; ROM and ORBI tests
 notebooks/           reproduce_figures.ipynb
 legacy/              original scripts (used by the regression test)
 results/, figures/   saved results and figures
